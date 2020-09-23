@@ -39,7 +39,7 @@ class InputFeatures(object):
 
 
 def convert_lst_to_features(lst_str, max_seq_length, max_position_embeddings,
-                            tokenizer, logger, is_tokenized=False, mask_cls_sep=False, no_special_token=False):
+                            tokenizer, logger, is_tokenized=False, mask_cls_sep=False, no_special_token=False, token_ids=False):
     """Loads a data file into a list of `InputBatch`s."""
 
     examples = read_tokenized_examples(lst_str) if is_tokenized else read_examples(lst_str)
@@ -47,6 +47,8 @@ def convert_lst_to_features(lst_str, max_seq_length, max_position_embeddings,
     _tokenize = lambda x: tokenizer.mark_unk_tokens(x) if is_tokenized else tokenizer.tokenize(x)
 
     all_tokens = [(_tokenize(ex.text_a), _tokenize(ex.text_b) if ex.text_b else []) for ex in examples]
+
+    logger.info(all_tokens)
 
     # user did not specify a meaningful sequence length
     # override the sequence length by the maximum seq length of the current batch
@@ -62,75 +64,117 @@ def convert_lst_to_features(lst_str, max_seq_length, max_position_embeddings,
                        'hence set "max_seq_length"=%d according to the current batch.' % (
                            max_position_embeddings, max_seq_length))
 
-    for (tokens_a, tokens_b) in all_tokens:
-        if tokens_b:
-            # Modifies `tokens_a` and `tokens_b` in place so that the total
-            # length is less than the specified length.
-            # Account for [CLS], [SEP], [SEP] with "- 3"
-            _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
-        else:
-            # Account for [CLS] and [SEP] with "- 2" when with the special token
-            if len(tokens_a) > max_seq_length - 2 and not no_special_token:
-                tokens_a = tokens_a[0:(max_seq_length - 2)]
-            # truncate with max_sql_length when without special token and tokenized
-            elif len(tokens_a) > max_seq_length and (no_special_token and is_tokenized):
-                tokens_a = tokens_a[0:max_seq_length]
+    if token_ids:
+        logger.info(lst_str)
+        if max_seq_length is None:
+            max_seq_length = max(len(l) for l in lst_str) - 2
+            max_seq_length = min(max_seq_length, max_position_embeddings)
+        for l in lst_str:
+            input_ids = [int(i) for i in l]
+            logger.info(input_ids)
+            input_mask = [1] * len(l)
+            input_type_ids = [0] * len(l)
 
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids: 0     0  0    0    0     0       0 0     1  1  1  1   1 1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids: 0     0   0   0  0     0 0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambiguously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        if no_special_token and is_tokenized and not tokens_b:
-            tokens = tokens_a
-            # max_seq_length -= 2
-            input_mask = [1] * len(tokens_a)
-        else:
-            tokens = ['[CLS]'] + tokens_a + ['[SEP]']
-            input_mask = [int(not mask_cls_sep)] + [1] * len(tokens_a) + [int(not mask_cls_sep)]
-        input_type_ids = [0] * len(tokens)
+            # Zero-pad up to the sequence length. more pythonic
+            pad_len = max_seq_length - len(input_ids)
+            input_ids += [0] * pad_len
+            input_mask += [0] * pad_len
+            input_type_ids += [0] * pad_len
 
-        if tokens_b:
-            tokens += tokens_b + ['[SEP]']
-            input_type_ids += [1] * (len(tokens_b) + 1)
-            input_mask += [1] * len(tokens_b) + [int(not mask_cls_sep)]
+            logger.info(input_ids)
+            logger.info(input_mask)
+            logger.info(input_type_ids)
 
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(input_type_ids) == max_seq_length
 
-        # Zero-pad up to the sequence length. more pythonic
-        pad_len = max_seq_length - len(input_ids)
-        input_ids += [0] * pad_len
-        input_mask += [0] * pad_len
-        input_type_ids += [0] * pad_len
+            logger.debug('tokens: %s' % ' '.join([tokenization.printable_text(x) for x in []]))
+            logger.debug('input_ids: %s' % ' '.join([str(x) for x in input_ids]))
+            logger.debug('input_mask: %s' % ' '.join([str(x) for x in input_mask]))
+            logger.debug('input_type_ids: %s' % ' '.join([str(x) for x in input_type_ids]))
 
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(input_type_ids) == max_seq_length
+            yield InputFeatures(
+                # unique_id=example.unique_id,
+                tokens=[],
+                input_ids=input_ids,
+                input_mask=input_mask,
+                input_type_ids=input_type_ids)
+    else:
+        for (tokens_a, tokens_b) in all_tokens:
+            if tokens_b:
+                # Modifies `tokens_a` and `tokens_b` in place so that the total
+                # length is less than the specified length.
+                # Account for [CLS], [SEP], [SEP] with "- 3"
+                _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
+            else:
+                # Account for [CLS] and [SEP] with "- 2" when with the special token
+                if len(tokens_a) > max_seq_length - 2 and not no_special_token:
+                    tokens_a = tokens_a[0:(max_seq_length - 2)]
+                # truncate with max_sql_length when without special token and tokenized
+                elif len(tokens_a) > max_seq_length and (no_special_token and is_tokenized):
+                    tokens_a = tokens_a[0:max_seq_length]
 
-        logger.debug('tokens: %s' % ' '.join([tokenization.printable_text(x) for x in tokens]))
-        logger.debug('input_ids: %s' % ' '.join([str(x) for x in input_ids]))
-        logger.debug('input_mask: %s' % ' '.join([str(x) for x in input_mask]))
-        logger.debug('input_type_ids: %s' % ' '.join([str(x) for x in input_type_ids]))
+            # The convention in BERT is:
+            # (a) For sequence pairs:
+            #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+            #  type_ids: 0     0  0    0    0     0       0 0     1  1  1  1   1 1
+            # (b) For single sequences:
+            #  tokens:   [CLS] the dog is hairy . [SEP]
+            #  type_ids: 0     0   0   0  0     0 0
+            #
+            # Where "type_ids" are used to indicate whether this is the first
+            # sequence or the second sequence. The embedding vectors for `type=0` and
+            # `type=1` were learned during pre-training and are added to the wordpiece
+            # embedding vector (and position vector). This is not *strictly* necessary
+            # since the [SEP] token unambiguously separates the sequences, but it makes
+            # it easier for the model to learn the concept of sequences.
+            #
+            # For classification tasks, the first vector (corresponding to [CLS]) is
+            # used as as the "sentence vector". Note that this only makes sense because
+            # the entire model is fine-tuned.
+            if no_special_token and is_tokenized and not tokens_b:
+                tokens = tokens_a
+                # max_seq_length -= 2
+                input_mask = [1] * len(tokens_a)
+            else:
+                tokens = ['[CLS]'] + tokens_a + ['[SEP]']
+                input_mask = [int(not mask_cls_sep)] + [1] * len(tokens_a) + [int(not mask_cls_sep)]
+            input_type_ids = [0] * len(tokens)
 
-        yield InputFeatures(
-            # unique_id=example.unique_id,
-            tokens=tokens,
-            input_ids=input_ids,
-            input_mask=input_mask,
-            input_type_ids=input_type_ids)
+            if tokens_b:
+                tokens += tokens_b + ['[SEP]']
+                input_type_ids += [1] * (len(tokens_b) + 1)
+                input_mask += [1] * len(tokens_b) + [int(not mask_cls_sep)]
+
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+            # Zero-pad up to the sequence length. more pythonic
+            pad_len = max_seq_length - len(input_ids)
+            input_ids += [0] * pad_len
+            input_mask += [0] * pad_len
+            input_type_ids += [0] * pad_len
+
+            logger.info(input_ids)
+            logger.info(input_mask)
+            logger.info(input_type_ids)
+
+
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(input_type_ids) == max_seq_length
+
+            logger.debug('tokens: %s' % ' '.join([tokenization.printable_text(x) for x in tokens]))
+            logger.debug('input_ids: %s' % ' '.join([str(x) for x in input_ids]))
+            logger.debug('input_mask: %s' % ' '.join([str(x) for x in input_mask]))
+            logger.debug('input_type_ids: %s' % ' '.join([str(x) for x in input_type_ids]))
+
+            yield InputFeatures(
+                # unique_id=example.unique_id,
+                tokens=tokens,
+                input_ids=input_ids,
+                input_mask=input_mask,
+                input_type_ids=input_type_ids)
 
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):

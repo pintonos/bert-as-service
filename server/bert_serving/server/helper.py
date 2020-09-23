@@ -119,6 +119,8 @@ def get_args_parser():
                         help='Whether to add position embeddings for the position of each token in the sequence.')
     group2.add_argument('-num_labels', type=int, default=2,
                         help='Numbers of Label')
+    group2.add_argument('-token_ids', action='store_true', default=False,
+                        help='For cases when a list of token ids are already given.')
     
     group3 = parser.add_argument_group('Serving Configs',
                                        'config how server utilizes GPU/CPU resources')

@@ -476,6 +476,7 @@ class BertWorker(Process):
         self.show_tokens_to_client = args.show_tokens_to_client
         self.no_special_token = args.no_special_token
         self.is_ready = multiprocessing.Event()
+        self.token_ids = args.token_ids
 
     def close(self):
         self.logger.info('shutting down...')
@@ -565,13 +566,21 @@ class BertWorker(Process):
                     if sock in events:
                         client_id, raw_msg = sock.recv_multipart()
                         msg = jsonapi.loads(raw_msg)
+                        logger.info(msg)
                         logger.info('new job\tsocket: %d\tsize: %d\tclient: %s' % (sock_idx, len(msg), client_id))
                         # check if msg is a list of list, if yes consider the input is already tokenized
                         is_tokenized = all(isinstance(el, list) for el in msg)
+                        token_ids = True if msg[0][0] == '101' else False
                         tmp_f = list(convert_lst_to_features(msg, self.max_seq_len,
                                                              self.bert_config.max_position_embeddings,
                                                              tokenizer, logger,
-                                                             is_tokenized, self.mask_cls_sep, self.no_special_token))
+                                                             is_tokenized, self.mask_cls_sep, self.no_special_token, token_ids))
+                        logger.info({
+                            'client_id': client_id,
+                            'input_ids': [f.input_ids for f in tmp_f],
+                            'input_mask': [f.input_mask for f in tmp_f],
+                            'input_type_ids': [f.input_type_ids for f in tmp_f]
+                        })
                         if self.show_tokens_to_client:
                             sink.send_multipart([client_id, jsonapi.dumps([f.tokens for f in tmp_f]),
                                                  b'', ServerCmd.data_token])
